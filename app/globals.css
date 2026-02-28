@@ -1,26 +1,118 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #0f1117;
+  --surface: #161b27;
+  --surface-2: #1e2535;
+  --surface-3: #252d3d;
+  --border: #2a3347;
+  --border-2: #3a4560;
+  --text-primary: #f0f4ff;
+  --text-secondary: #8892aa;
+  --text-muted: #5a6478;
+  --accent: #4f7cff;
+  --accent-hover: #6b93ff;
+  --accent-glow: rgba(79, 124, 255, 0.25);
+  --green: #22c55e;
+  --red: #ef4444;
+  --yellow: #eab308;
+  --purple: #a855f7;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--background);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
 }
+
+/* ─── 3D Button ──────────────────────────────────────────── */
+.btn-3d {
+  position: relative;
+  transform-style: preserve-3d;
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+.btn-3d:hover  { transform: translateY(-1px); }
+.btn-3d:active { transform: translateY(2px); }
+
+/* ─── Card glow ──────────────────────────────────────────── */
+.card-glow {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 12px;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.4);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+.card-glow:hover {
+  border-color: var(--border-2);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.5), 0 0 0 1px rgba(79,124,255,0.08);
+}
+
+/* ─── Animations ─────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(24px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@keyframes timerPulse {
+  from { opacity: 1; }
+  to   { opacity: 0.5; }
+}
+@keyframes bidFlash {
+  0%   { background-color: rgba(79,124,255,0.3); }
+  100% { background-color: transparent; }
+}
+
+.animate-fade-in-up  { animation: fadeInUp 0.4s ease both; }
+.animate-fade-in     { animation: fadeIn 0.3s ease both; }
+.animate-slide-right { animation: slideInRight 0.35s ease both; }
+.animate-delay-100   { animation-delay: 0.1s; }
+.animate-delay-200   { animation-delay: 0.2s; }
+.animate-delay-300   { animation-delay: 0.3s; }
+.animate-delay-400   { animation-delay: 0.4s; }
+
+/* ─── Skeleton ───────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--surface-3) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 6px;
+}
+
+/* ─── Scrollbar ──────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #4a5670; }
+
+/* ─── Inputs ─────────────────────────────────────────────── */
+input:focus, textarea:focus, select:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent-glow), 0 0 0 1px var(--accent);
+}
+
+.otp-input {
+  width: 52px; height: 60px; text-align: center;
+  font-size: 1.5rem; font-weight: 700; letter-spacing: 0.05em;
+  background: var(--surface-2); border: 1px solid var(--border);
+  border-radius: 10px; color: var(--text-primary); transition: border-color 0.15s;
+}
+.otp-input:focus { border-color: var(--accent); }
+
+.timer-critical { color: #ef4444; animation: timerPulse 0.5s ease-in-out infinite alternate; }
+.bid-flash      { animation: bidFlash 0.4s ease; }

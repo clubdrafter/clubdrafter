@@ -1,36 +1,94 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Clubdrafter — Fantasy IPL Auction Platform
 
-## Getting Started
+A full-stack fantasy sports auction platform built with Next.js, Supabase, and Tailwind CSS. Starts with IPL cricket; add future tournaments without restructuring the codebase.
 
-First, run the development server:
+---
+
+## Tech Stack
+
+| Layer     | Technology |
+|---|---|
+| Framework | Next.js (App Router) |
+| Styling   | Tailwind CSS (custom dark theme) |
+| Database  | Supabase (PostgreSQL + Realtime) |
+| Auth      | Supabase Auth (email + OTP) |
+| Email     | Resend |
+| Hosting   | Vercel + Supabase |
+
+---
+
+## Deployment (Vercel + Supabase)
+
+### 1 — Create Supabase project
+
+1. [supabase.com](https://supabase.com) → New Project
+2. SQL Editor → paste `supabase/migrations/001_initial_schema.sql` → Run
+
+### 2 — Configure Auth
+
+1. Authentication → Providers → Email → enable OTP
+2. URL Config → Site URL: `https://yourapp.vercel.app`
+3. Redirect URLs: `https://yourapp.vercel.app/api/auth/callback`
+
+### 3 — Set up Resend
+
+[resend.com](https://resend.com) → create API key → verify your domain
+
+### 4 — Deploy to Vercel
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+cd clubdrafter
+npx vercel
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### 5 — Environment variables (Vercel dashboard)
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+NEXT_PUBLIC_SUPABASE_URL        = https://xxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY  = eyJ...
+SUPABASE_SERVICE_ROLE_KEY       = eyJ...
+RESEND_API_KEY                  = re_...
+RESEND_FROM_EMAIL               = noreply@yourdomain.com
+NEXT_PUBLIC_APP_URL             = https://yourapp.vercel.app
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### 6 — Make yourself admin
 
-## Learn More
+```sql
+UPDATE user_profiles SET is_admin = TRUE WHERE email = 'your@email.com';
+```
 
-To learn more about Next.js, take a look at the following resources:
+Then go to `/admin` to access the admin panel and add IPL players.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Local Development
 
-## Deploy on Vercel
+```bash
+cd clubdrafter
+npm install
+cp .env.local.example .env.local
+# fill in Supabase + Resend values
+npm run dev
+# open http://localhost:3000
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Security
+
+- All bid validation is server-side (wallet, max-spendable, role limits, foreign cap)
+- Row Level Security on every Supabase table
+- Session cookies: httpOnly, SameSite via Supabase SSR
+- Security headers in `next.config.ts` (CSP, X-Frame-Options, etc.)
+- Admin access gated by `is_admin` DB flag, not just a secret URL
+
+---
+
+## Adding Future Tournaments
+
+1. Admin → Tournaments → Add (e.g. FIFA World Cup)
+2. Admin → Players → Add players for that tournament
+3. Hosts select the tournament when creating a new auction
+
+No code changes required.
