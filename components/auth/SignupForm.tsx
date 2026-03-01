@@ -7,13 +7,18 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
-export function SignupForm() {
+interface Props {
+  initialEmail?: string
+  auctionId?: string
+}
+
+export function SignupForm({ initialEmail, auctionId }: Props = {}) {
   // Anon client used only for username availability check (SELECT on user_profiles)
   const supabase = createClient()
 
   const [displayName, setDisplayName] = useState('')
   const [username, setUsername]       = useState('')
-  const [email, setEmail]             = useState('')
+  const [email, setEmail]             = useState(initialEmail ?? '')
   const [password, setPassword]       = useState('')
   const [confirmPw, setConfirmPw]     = useState('')
   const [showPw, setShowPw]           = useState(false)
@@ -72,6 +77,7 @@ export function SignupForm() {
         password,
         username: username.toLowerCase(),
         display_name: displayName.trim(),
+        ...(auctionId ? { auction_id: auctionId } : {}),
       }),
     })
 

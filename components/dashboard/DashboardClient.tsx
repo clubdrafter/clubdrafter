@@ -41,21 +41,25 @@ export function DashboardClient({ userId, participations, hostedAuctions }: Prop
   }, [userId, supabase, router])
 
   async function handleAccept(participationId: string, auctionId: string) {
-    const { error } = await supabase
-      .from('auction_participants')
-      .update({ invite_status: 'accepted' })
-      .eq('id', participationId)
-    if (error) { toast.error('Could not accept invite'); return }
+    // Use API route with service role to bypass the ap_read ↔ auctions_read
+    // circular RLS policy that blocks direct client-side UPDATE + SELECT.
+    const res = await fetch(`/api/auctions/${auctionId}/respond`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'accepted' }),
+    })
+    if (!res.ok) { toast.error('Could not accept invite'); return }
     setParts(prev => prev.map(p => p.id === participationId ? { ...p, invite_status: 'accepted' } : p))
     toast.success('Invite accepted!')
   }
 
-  async function handleReject(participationId: string) {
-    const { error } = await supabase
-      .from('auction_participants')
-      .update({ invite_status: 'rejected' })
-      .eq('id', participationId)
-    if (error) { toast.error('Could not reject invite'); return }
+  async function handleReject(participationId: string, auctionId: string) {
+    const res = await fetch(`/api/auctions/${auctionId}/respond`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'rejected' }),
+    })
+    if (!res.ok) { toast.error('Could not reject invite'); return }
     setParts(prev => prev.filter(p => p.id !== participationId))
     toast.info('Invite rejected')
   }
@@ -78,7 +82,7 @@ export function DashboardClient({ userId, participations, hostedAuctions }: Prop
           <Button size="sm" variant="success" onClick={() => handleAccept(participation!.id, auction.id)}>
             <CheckCircle size={14} /> Accept
           </Button>
-          <Button size="sm" variant="danger" onClick={() => handleReject(participation!.id)}>
+          <Button size="sm" variant="danger" onClick={() => handleReject(participation!.id, auction.id)}>
             <XCircle size={14} /> Reject
           </Button>
         </div>
