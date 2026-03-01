@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Gavel, Wallet, Users, CheckCircle, Clock, Trophy, ChevronDown, ChevronUp } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -33,20 +33,32 @@ export function LiveAuctionRoom({ auction: initialAuction, participation: initia
   const [bidding, setBidding]     = useState(false)
   const [completing, setCompleting] = useState(false)
   const [statsOpen, setStatsOpen] = useState(false)
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timerRef       = useRef<ReturnType<typeof setInterval> | null>(null)
+  const resolvedForRef = useRef<string | null>(null) // tracks which timer_ends_at we've already resolved
 
-  // Timer countdown
+  // Timer countdown — auto-calls resolve when the timer hits 0.
+  // Any authenticated participant can trigger resolve; the server deduplicates.
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current)
     if (!auction.timer_ends_at) { setTimer(0); return }
+
     const calc = () => {
       const diff = Math.max(0, Math.ceil((new Date(auction.timer_ends_at!).getTime() - Date.now()) / 1000))
       setTimer(diff)
+
+      if (diff === 0 && auction.current_player_id && resolvedForRef.current !== auction.timer_ends_at) {
+        resolvedForRef.current = auction.timer_ends_at!
+        fetch(`/api/auctions/${auction.id}/timer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'resolve' }),
+        })
+      }
     }
     calc()
     timerRef.current = setInterval(calc, 250)
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
-  }, [auction.timer_ends_at])
+  }, [auction.timer_ends_at, auction.current_player_id, auction.id])
 
   // Realtime subscription
   useEffect(() => {
