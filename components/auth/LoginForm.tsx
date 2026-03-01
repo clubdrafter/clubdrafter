@@ -15,22 +15,19 @@ export function LoginForm() {
   const router = useRouter()
   const supabase = createClient()
 
-  const [step, setStep]         = useState<Step>('email')
-  const [email, setEmail]       = useState('')
-  const [password, setPassword] = useState('')
-  const [showPw, setShowPw]     = useState(false)
-  const [error, setError]       = useState('')
-  const [loading, setLoading]   = useState(false)
+  const [step, setStep]           = useState<Step>('email')
+  const [email, setEmail]         = useState('')
+  const [password, setPassword]   = useState('')
+  const [showPw, setShowPw]       = useState(false)
+  const [error, setError]         = useState('')
+  const [loading, setLoading]     = useState(false)
+  const [navigating, setNavigating] = useState(false)
   const [resetSent, setResetSent] = useState(false)
 
   const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
 
-  async function handleEmailContinue() {
+  function handleEmailContinue() {
     if (!isValidEmail) { setError('Enter a valid email address'); return }
-    setLoading(true); setError('')
-    // Check if user exists by attempting to sign in with a dummy password
-    // We can't enumerate users directly — just move to password step
-    setLoading(false)
     setStep('password')
   }
 
@@ -38,11 +35,13 @@ export function LoginForm() {
     if (!password) { setError('Enter your password'); return }
     setLoading(true); setError('')
     const { error: err } = await supabase.auth.signInWithPassword({ email, password })
-    setLoading(false)
     if (err) {
+      setLoading(false)
       setError('Incorrect email or password')
       return
     }
+    // Keep loading=true while navigating — show full-screen overlay
+    setNavigating(true)
     router.push('/dashboard')
     router.refresh()
   }
@@ -56,6 +55,16 @@ export function LoginForm() {
     setLoading(false)
     if (err) { toast.error('Could not send reset email. Try again.'); return }
     setResetSent(true)
+  }
+
+  // ── Full-screen navigation overlay
+  if (navigating) {
+    return (
+      <div className="fixed inset-0 z-50 bg-[#0f1117] flex flex-col items-center justify-center gap-4">
+        <div className="w-10 h-10 rounded-full border-2 border-[#4f7cff] border-t-transparent animate-spin" />
+        <p className="text-sm text-[#8892aa]">Signing you in…</p>
+      </div>
+    )
   }
 
   // ── Forgot password screen
@@ -125,7 +134,7 @@ export function LoginForm() {
               onKeyDown={e => { if (e.key === 'Enter') handleLogin() }}
               placeholder="Your password"
               autoFocus
-              className="w-full rounded-xl bg-[#1e2535] border border-[#2a3347] text-[#f0f4ff] placeholder:text-[#5a6478] pl-9 pr-10 py-2.5 text-sm h-11 focus:border-[#4f7cff] transition-colors"
+              className="w-full rounded-xl bg-[#1e2535] border border-[#2a3347] text-[#f0f4ff] placeholder:text-[#5a6478] pl-9 pr-10 py-2.5 text-sm h-11 focus:border-[#4f7cff] transition-colors outline-none"
             />
             <button
               type="button"
@@ -175,7 +184,7 @@ export function LoginForm() {
         autoFocus
       />
 
-      <Button fullWidth loading={loading} onClick={handleEmailContinue} disabled={!isValidEmail}>
+      <Button fullWidth onClick={handleEmailContinue} disabled={!isValidEmail}>
         Continue
       </Button>
 
