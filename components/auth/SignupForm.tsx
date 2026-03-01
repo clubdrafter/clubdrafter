@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button'
 import { Input } from '@/components/ui/Input'
 
 export function SignupForm() {
+  // Anon client used only for username availability check (SELECT on user_profiles)
   const supabase = createClient()
 
   const [displayName, setDisplayName] = useState('')
@@ -61,20 +62,25 @@ export function SignupForm() {
     if (!canSubmit) return
     setLoading(true); setError('')
 
-    const { error: err } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: {
-          username: username.toLowerCase(),
-          display_name: displayName.trim(),
-        },
-        emailRedirectTo: `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback`,
-      },
+    // Server-side route uses the service role key to guarantee the profile row
+    // is created even if the database trigger fails due to RLS or a constraint issue.
+    const res = await fetch('/api/auth/signup', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password,
+        username: username.toLowerCase(),
+        display_name: displayName.trim(),
+      }),
     })
 
     setLoading(false)
-    if (err) { setError(err.message); return }
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      setError(body.error || 'Something went wrong. Please try again.')
+      return
+    }
     setDone(true)
   }
 

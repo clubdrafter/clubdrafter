@@ -34,16 +34,20 @@ CREATE TABLE user_profiles (
 
 -- Auto-create profile row when a user signs up
 CREATE OR REPLACE FUNCTION handle_new_user()
-RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER AS $$
+RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = '' AS $$
 BEGIN
-  INSERT INTO user_profiles (id, email, username, display_name)
+  INSERT INTO public.user_profiles (id, email, username, display_name)
   VALUES (
     NEW.id,
     NEW.email,
     COALESCE(NEW.raw_user_meta_data->>'username', split_part(NEW.email,'@',1)),
     COALESCE(NEW.raw_user_meta_data->>'display_name', split_part(NEW.email,'@',1))
   )
-  ON CONFLICT (id) DO NOTHING;
+  ON CONFLICT DO NOTHING;  -- handles conflicts on ANY unique column (id OR username)
+  RETURN NEW;
+EXCEPTION WHEN OTHERS THEN
+  -- Never block auth user creation due to a profile insert failure.
+  -- The server-side /api/auth/signup route will upsert the profile via service role.
   RETURN NEW;
 END;
 $$;
