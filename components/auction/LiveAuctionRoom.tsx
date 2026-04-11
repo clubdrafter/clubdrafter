@@ -31,12 +31,12 @@ export function LiveAuctionRoom({ auction: initialAuction, participation: initia
   const [myPart, setMyPart]         = useState(initialPart)
   const [pool, setPool]             = useState(initialPool)
   const [timer, setTimer]           = useState(0)
-  const [bidding, setBidding]       = useState(false)
   const [completing, setCompleting] = useState(false)
   const [statsOpen, setStatsOpen]   = useState(false)
   const [connected, setConnected]   = useState(true)
   const timerRef       = useRef<ReturnType<typeof setInterval> | null>(null)
   const resolvedForRef = useRef<string | null>(null)
+  const channelRef     = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   // ── Timer countdown ───────────────────────────────────────────────────────
   useEffect(() => {
@@ -148,7 +148,11 @@ export function LiveAuctionRoom({ auction: initialAuction, participation: initia
         }
       })
 
-    return () => { supabase.removeChannel(channel) }
+    channelRef.current = channel
+    return () => {
+      channelRef.current = null
+      supabase.removeChannel(channel)
+    }
   }, [auction.id, userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentPlayer = auction.current_player_id
@@ -176,15 +180,28 @@ export function LiveAuctionRoom({ auction: initialAuction, participation: initia
     if (proposedBid > myPart.wallet_cr) { toast.error('Insufficient wallet balance'); return }
     if (proposedBid > maxSpendable)     { toast.error('Not enough balance to complete minimum squad'); return }
 
-    setBidding(true)
-    const res = await fetch(`/api/auctions/${auction.id}/bid`, {
+    // 1. Broadcast over the open WebSocket — all clients see the bid in ~50ms,
+    //    no HTTP round-trip required. Timer is estimated; server will correct it
+    //    via postgres_changes once the DB write lands.
+    const tentativeTimerEnd = new Date(Date.now() + 8 * 1000).toISOString()
+    channelRef.current?.send({
+      type: 'broadcast',
+      event: 'bid_placed',
+      payload: { type: 'bid_placed', amount_cr: proposedBid, bidder_id: userId, timer_ends_at: tentativeTimerEnd },
+    })
+
+    // 2. Validate and persist on the server in the background — UI is already updated.
+    //    If rejected (e.g. bid conflict), show a toast; postgres_changes will reconcile.
+    fetch(`/api/auctions/${auction.id}/bid`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ amount_cr: proposedBid }),
+    }).then(async res => {
+      if (!res.ok) {
+        const data = await res.json()
+        toast.error(data.error || 'Bid failed')
+      }
     })
-    setBidding(false)
-    const data = await res.json()
-    if (!res.ok) toast.error(data.error || 'Bid failed')
   }
 
   async function handleCompleteAuction() {
@@ -317,7 +334,7 @@ export function LiveAuctionRoom({ auction: initialAuction, participation: initia
             <div className="grid grid-cols-4 gap-2">
               {BID_INCREMENTS.map(inc => {
                 const newBid = (auction.current_bid_cr || 0) + inc
-                const disabled = newBid > maxSpendable || bidding
+                const disabled = newBid > maxSpendable
                 return (
                   <button
                     key={inc}
