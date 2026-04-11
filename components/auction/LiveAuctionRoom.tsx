@@ -2,14 +2,14 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-import { Gavel, Wallet, Users, CheckCircle, Clock, Trophy, ChevronDown, ChevronUp } from 'lucide-react'
+import { Gavel, Wallet, Users, CheckCircle, Clock, Trophy, ChevronDown, ChevronUp, WifiOff } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/Button'
 import { Badge } from '@/components/ui/Badge'
 import { toast } from '@/components/shared/Toaster'
 import { formatCr, getRoleLabel, getRoleColor, cn } from '@/lib/utils'
 import { calcMaxSpendable, meetsMinimumCriteria, countRoles } from '@/lib/auction-logic'
-import type { Auction, AuctionParticipant, AuctionPlayer, Player } from '@/types'
+import type { Auction, AuctionParticipant, AuctionPlayer, AuctionBroadcast, Player } from '@/types'
 
 interface Props {
   auction: Auction
@@ -24,20 +24,21 @@ const BID_INCREMENTS = [0.5, 1, 2, 5] // Cr
 
 export function LiveAuctionRoom({ auction: initialAuction, participation: initialPart, allParticipants, auctionPlayers: initialPool, userId, isHost }: Props) {
   const router = useRouter()
-  const supabase = createClient()
+  // Stable client reference — createBrowserClient memoises internally but we pin it with a ref to be safe
+  const supabase = useRef(createClient()).current
 
-  const [auction, setAuction]     = useState(initialAuction)
-  const [myPart, setMyPart]       = useState(initialPart)
-  const [pool, setPool]           = useState(initialPool)
-  const [timer, setTimer]         = useState(0)
-  const [bidding, setBidding]     = useState(false)
+  const [auction, setAuction]       = useState(initialAuction)
+  const [myPart, setMyPart]         = useState(initialPart)
+  const [pool, setPool]             = useState(initialPool)
+  const [timer, setTimer]           = useState(0)
+  const [bidding, setBidding]       = useState(false)
   const [completing, setCompleting] = useState(false)
-  const [statsOpen, setStatsOpen] = useState(false)
+  const [statsOpen, setStatsOpen]   = useState(false)
+  const [connected, setConnected]   = useState(true)
   const timerRef       = useRef<ReturnType<typeof setInterval> | null>(null)
-  const resolvedForRef = useRef<string | null>(null) // tracks which timer_ends_at we've already resolved
+  const resolvedForRef = useRef<string | null>(null)
 
-  // Timer countdown — auto-calls resolve when the timer hits 0.
-  // Any authenticated participant can trigger resolve; the server deduplicates.
+  // ── Timer countdown ───────────────────────────────────────────────────────
   useEffect(() => {
     if (timerRef.current) clearInterval(timerRef.current)
     if (!auction.timer_ends_at) { setTimer(0); return }
@@ -60,10 +61,66 @@ export function LiveAuctionRoom({ auction: initialAuction, participation: initia
     return () => { if (timerRef.current) clearInterval(timerRef.current) }
   }, [auction.timer_ends_at, auction.current_player_id, auction.id])
 
-  // Realtime subscription
+  // ── WebSocket room — one persistent channel per auction ───────────────────
+  // Broadcast events (~50 ms) fire first for instant UI; postgres_changes (~200-500 ms)
+  // reconciles afterward to ensure consistency if a broadcast is ever missed.
   useEffect(() => {
     const channel = supabase
-      .channel(`auction:${auction.id}`)
+      .channel(`auction:${auction.id}`, { config: { broadcast: { ack: false } } })
+
+      // ── Broadcast listeners (instant) ──────────────────────────────────────
+      .on('broadcast', { event: 'bid_placed' }, ({ payload }) => {
+        const p = payload as Extract<AuctionBroadcast, { type: 'bid_placed' }>
+        setAuction(prev => ({
+          ...prev,
+          current_bid_cr: p.amount_cr,
+          current_bidder_id: p.bidder_id,
+          timer_mode: 'bid' as const,
+          timer_ends_at: p.timer_ends_at,
+        }))
+      })
+
+      .on('broadcast', { event: 'player_up' }, ({ payload }) => {
+        const p = payload as Extract<AuctionBroadcast, { type: 'player_up' }>
+        setAuction(prev => ({
+          ...prev,
+          ...(p.auction_status ? { status: p.auction_status as Auction['status'] } : {}),
+          current_player_id: p.player_id,
+          current_bid_cr: 0,
+          current_bidder_id: null,
+          timer_mode: 'no_bid' as const,
+          timer_ends_at: p.timer_ends_at,
+        }))
+      })
+
+      .on('broadcast', { event: 'player_sold' }, ({ payload }) => {
+        const p = payload as Extract<AuctionBroadcast, { type: 'player_sold' }>
+        setPool(prev => prev.map(ap =>
+          ap.player_id === p.player_id
+            ? { ...ap, auction_status: 'sold' as const, owner_participant_id: p.winner_participant_id, purchase_price_cr: p.price_cr }
+            : ap
+        ))
+      })
+
+      .on('broadcast', { event: 'player_unsold' }, ({ payload }) => {
+        const p = payload as Extract<AuctionBroadcast, { type: 'player_unsold' }>
+        setPool(prev => prev.map(ap =>
+          ap.player_id === p.player_id ? { ...ap, auction_status: 'unsold' as const } : ap
+        ))
+      })
+
+      .on('broadcast', { event: 'wallet_update' }, ({ payload }) => {
+        const p = payload as Extract<AuctionBroadcast, { type: 'wallet_update' }>
+        if (p.participant_id === myPart.id) {
+          setMyPart(prev => ({ ...prev, wallet_cr: p.wallet_cr }))
+        }
+      })
+
+      .on('broadcast', { event: 'auction_ended' }, () => {
+        setAuction(prev => ({ ...prev, status: 'league_live', current_player_id: null }))
+      })
+
+      // ── postgres_changes fallback (reconciliation) ──────────────────────────
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'auctions', filter: `id=eq.${auction.id}` },
         (payload) => setAuction(prev => ({ ...prev, ...payload.new }))
       )
@@ -81,10 +138,18 @@ export function LiveAuctionRoom({ auction: initialAuction, participation: initia
           ))
         }
       )
-      .subscribe()
+
+      // ── Connection status ───────────────────────────────────────────────────
+      .subscribe((status) => {
+        if (status === 'SUBSCRIBED') {
+          setConnected(true)
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          setConnected(false)
+        }
+      })
 
     return () => { supabase.removeChannel(channel) }
-  }, [auction.id, userId, supabase])
+  }, [auction.id, userId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const currentPlayer = auction.current_player_id
     ? pool.find(ap => ap.player_id === auction.current_player_id)?.player
@@ -179,6 +244,14 @@ export function LiveAuctionRoom({ auction: initialAuction, participation: initia
 
   return (
     <div className="flex flex-col gap-4 max-w-2xl mx-auto animate-fade-in">
+      {/* Connection status banner */}
+      {!connected && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400 text-xs">
+          <WifiOff size={13} />
+          <span>Connection lost — reconnecting…</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>

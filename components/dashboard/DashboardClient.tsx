@@ -26,15 +26,29 @@ export function DashboardClient({ userId, participations, hostedAuctions }: Prop
   const [parts, setParts] = useState<Participation[]>(participations)
   const [hosted, setHosted] = useState<Auction[]>(hostedAuctions)
 
-  // Real-time: subscribe to participation changes
+  // Real-time: subscribe to participation and auction changes
   useEffect(() => {
     const channel = supabase
       .channel('dashboard')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'auction_participants', filter: `user_id=eq.${userId}` },
-        () => router.refresh()
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'auction_participants', filter: `user_id=eq.${userId}` },
+        () => router.refresh() // new invite needs full server fetch for nested auction data
+      )
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'auction_participants', filter: `user_id=eq.${userId}` },
+        (payload) => setParts(prev => prev.map(p =>
+          p.id === (payload.new as AuctionParticipant).id ? { ...p, ...(payload.new as AuctionParticipant) } : p
+        ))
+      )
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'auction_participants', filter: `user_id=eq.${userId}` },
+        (payload) => setParts(prev => prev.filter(p => p.id !== (payload.old as { id: string }).id))
       )
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'auctions' },
-        () => router.refresh()
+        (payload) => {
+          const updated = payload.new as Auction
+          setParts(prev => prev.map(p =>
+            p.auction.id === updated.id ? { ...p, auction: { ...p.auction, ...updated } } : p
+          ))
+          setHosted(prev => prev.map(a => a.id === updated.id ? { ...a, ...updated } : a))
+        }
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }

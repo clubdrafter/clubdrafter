@@ -2,6 +2,24 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 import { validateBid } from '@/lib/auction-logic'
 
+async function broadcastToAuction(auctionId: string, payload: Record<string, unknown>) {
+  try {
+    await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/realtime/v1/api/broadcast`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
+      },
+      body: JSON.stringify({
+        messages: [{ topic: `realtime:auction:${auctionId}`, event: payload.type, payload }],
+      }),
+    })
+  } catch {
+    // Non-critical — postgres_changes is the fallback
+  }
+}
+
 const BID_TIMER_SECONDS = 8
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -89,6 +107,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     .eq('current_bid_cr', auction.current_bid_cr) // optimistic lock
 
   if (updateErr) return NextResponse.json({ error: 'Bid conflict — try again' }, { status: 409 })
+
+  // Broadcast immediately for low-latency client updates (postgres_changes is the fallback)
+  broadcastToAuction(auctionId, { type: 'bid_placed', amount_cr, bidder_id: user.id, timer_ends_at: timerEndsAt })
 
   // Record bid history
   await service.from('bids').insert({

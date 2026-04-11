@@ -179,9 +179,9 @@ export type LeaderboardEntry = {
 // ─── Realtime broadcast payloads ─────────────────────────────────────────────
 
 export type AuctionBroadcast =
-  | { type: 'player_up'; player: Player; auction_player_id: string }
+  | { type: 'player_up'; player_id: string; timer_ends_at: string; auction_status?: string }
   | { type: 'bid_placed'; amount_cr: number; bidder_id: string; timer_ends_at: string }
-  | { type: 'player_sold'; player: Player; winner_id: string; price_cr: number }
-  | { type: 'player_unsold'; player: Player }
+  | { type: 'player_sold'; player_id: string; winner_participant_id: string; price_cr: number }
+  | { type: 'player_unsold'; player_id: string }
   | { type: 'auction_ended' }
   | { type: 'wallet_update'; participant_id: string; wallet_cr: number }

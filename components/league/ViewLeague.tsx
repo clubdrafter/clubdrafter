@@ -31,10 +31,17 @@ export function ViewLeague({ auction: initialAuction, participants: initialParts
     const channel = supabase
       .channel(`league:${auction.id}`)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'auction_participants', filter: `auction_id=eq.${auction.id}` },
-        () => router.refresh()
+        (payload) => setParticipants(prev => prev.map(p =>
+          p.id === (payload.new as AuctionParticipant).id ? { ...p, ...(payload.new as AuctionParticipant) } : p
+        ))
       )
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'auctions', filter: `id=eq.${auction.id}` },
-        payload => setAuction(prev => ({ ...prev, ...(payload.new as Auction) }))
+        (payload) => {
+          const updated = payload.new as Auction
+          setAuction(prev => ({ ...prev, ...updated }))
+          // Redirect into the live room as soon as auction goes live
+          if (updated.status === 'live_auction') router.push(`/auction/${auction.id}`)
+        }
       )
       .subscribe()
     return () => { supabase.removeChannel(channel) }

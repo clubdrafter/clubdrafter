@@ -1,6 +1,24 @@
 import { NextResponse } from 'next/server'
 import { createClient, createServiceClient } from '@/lib/supabase/server'
 
+async function broadcastToAuction(auctionId: string, payload: Record<string, unknown>) {
+  try {
+    await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/realtime/v1/api/broadcast`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY!}`,
+      },
+      body: JSON.stringify({
+        messages: [{ topic: `realtime:auction:${auctionId}`, event: payload.type, payload }],
+      }),
+    })
+  } catch {
+    // Non-critical — postgres_changes is the fallback
+  }
+}
+
 const NO_BID_TIMER = 30 // seconds
 
 /** Called by host to start auction, or by client timer to resolve expired timers */
@@ -40,6 +58,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       timer_ends_at: timerEndsAt,
     }).eq('id', auctionId)
 
+    broadcastToAuction(auctionId, { type: 'player_up', player_id: nextPlayer.player_id, timer_ends_at: timerEndsAt, auction_status: 'live_auction' })
     return NextResponse.json({ success: true })
   }
 
@@ -52,11 +71,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (auction.timer_mode === 'no_bid' && auction.current_bid_cr === 0) {
       // Mark unsold
       await service.from('auction_players').update({ auction_status: 'unsold' }).eq('player_id', auction.current_player_id).eq('auction_id', auctionId)
-      await advanceToNextPlayer(service, auctionId, auction)
+      broadcastToAuction(auctionId, { type: 'player_unsold', player_id: auction.current_player_id })
+      const next = await advanceToNextPlayer(service, auctionId, auction)
+      if (next.ended) broadcastToAuction(auctionId, { type: 'auction_ended' })
+      else broadcastToAuction(auctionId, { type: 'player_up', player_id: next.player_id!, timer_ends_at: next.timer_ends_at! })
     } else if (auction.timer_mode === 'bid' && auction.current_bidder_id) {
       // Sell to highest bidder
-      await sellCurrentPlayer(service, auctionId, auction)
-      await advanceToNextPlayer(service, auctionId, auction)
+      const sold = await sellCurrentPlayer(service, auctionId, auction)
+      broadcastToAuction(auctionId, { type: 'player_sold', player_id: auction.current_player_id, winner_participant_id: sold.winner_participant_id, price_cr: sold.price })
+      broadcastToAuction(auctionId, { type: 'wallet_update', participant_id: sold.winner_participant_id, wallet_cr: sold.new_wallet_cr })
+      const next = await advanceToNextPlayer(service, auctionId, auction)
+      if (next.ended) broadcastToAuction(auctionId, { type: 'auction_ended' })
+      else broadcastToAuction(auctionId, { type: 'player_up', player_id: next.player_id!, timer_ends_at: next.timer_ends_at! })
     }
 
     return NextResponse.json({ success: true })
@@ -77,7 +103,6 @@ async function pickNextPlayer(service: ReturnType<typeof createServiceClient>, a
 }
 
 async function sellCurrentPlayer(service: ReturnType<typeof createServiceClient>, auctionId: string, auction: Record<string, unknown>) {
-  // Find the winner's participant record
   const { data: winner } = await service
     .from('auction_participants')
     .select('id, wallet_cr')
@@ -85,9 +110,10 @@ async function sellCurrentPlayer(service: ReturnType<typeof createServiceClient>
     .eq('user_id', auction.current_bidder_id)
     .single()
 
-  if (!winner) return
+  if (!winner) return { winner_participant_id: '', price: 0, new_wallet_cr: 0 }
 
   const price = auction.current_bid_cr as number
+  const new_wallet_cr = (winner.wallet_cr as number) - price
 
   await Promise.all([
     service.from('auction_players').update({
@@ -97,12 +123,14 @@ async function sellCurrentPlayer(service: ReturnType<typeof createServiceClient>
     }).eq('player_id', auction.current_player_id as string).eq('auction_id', auctionId),
 
     service.from('auction_participants').update({
-      wallet_cr: (winner.wallet_cr as number) - price,
+      wallet_cr: new_wallet_cr,
     }).eq('id', winner.id),
   ])
+
+  return { winner_participant_id: winner.id as string, price, new_wallet_cr }
 }
 
-async function advanceToNextPlayer(service: ReturnType<typeof createServiceClient>, auctionId: string, auction: Record<string, unknown>) {
+async function advanceToNextPlayer(service: ReturnType<typeof createServiceClient>, auctionId: string, auction: Record<string, unknown>): Promise<{ ended: boolean; player_id?: string; timer_ends_at?: string }> {
   const next = await pickNextPlayer(service, auctionId)
 
   // Check if all teams are finalized
@@ -123,7 +151,7 @@ async function advanceToNextPlayer(service: ReturnType<typeof createServiceClien
       timer_mode: null,
       timer_ends_at: null,
     }).eq('id', auctionId)
-    return
+    return { ended: true }
   }
 
   const timerEndsAt = new Date(Date.now() + 30 * 1000).toISOString()
@@ -134,4 +162,5 @@ async function advanceToNextPlayer(service: ReturnType<typeof createServiceClien
     timer_mode: 'no_bid',
     timer_ends_at: timerEndsAt,
   }).eq('id', auctionId)
+  return { ended: false, player_id: next.player_id, timer_ends_at: timerEndsAt }
 }
