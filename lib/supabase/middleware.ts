@@ -1,61 +1,36 @@
-import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
-export async function updateSession(request: NextRequest) {
-  const supabaseUrl  = process.env.NEXT_PUBLIC_SUPABASE_URL
-  const supabaseKey  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-  if (!supabaseUrl || !supabaseKey) {
-    console.error('Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY env vars')
-    return NextResponse.next({ request })
-  }
-
-  let supabaseResponse = NextResponse.next({ request })
-
-  const supabase = createServerClient(
-    supabaseUrl,
-    supabaseKey,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          )
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
+// Check for session purely via cookie — zero network calls, no timeout risk.
+// Supabase SSR stores the session in cookies named sb-<project-ref>-auth-token[.N]
+// Actual token validation happens in Server Components via getUser().
+function hasSessionCookie(request: NextRequest): boolean {
+  return request.cookies.getAll().some(
+    (c) => c.name.startsWith('sb-') && c.name.includes('-auth-token')
   )
+}
 
-  // Use getSession (local cookie read) in middleware — getUser() makes a network call
-  // that exceeds Vercel's edge middleware timeout. Server Components use getUser() for security.
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user ?? null
-
+export function updateSession(request: NextRequest): NextResponse {
   const pathname = request.nextUrl.pathname
+  const loggedIn = hasSessionCookie(request)
 
   // Protect main app routes
-  const isMainRoute = pathname.startsWith('/dashboard') ||
+  const isMainRoute =
+    pathname.startsWith('/dashboard') ||
     pathname.startsWith('/auction') ||
     (pathname.startsWith('/admin') && pathname !== '/admin/login')
 
-  if (isMainRoute && !user) {
+  if (isMainRoute && !loggedIn) {
     const url = request.nextUrl.clone()
     url.pathname = '/login'
     return NextResponse.redirect(url)
   }
 
   // Redirect logged-in users away from auth pages
-  if (user && (pathname === '/login' || pathname === '/signup')) {
+  if (loggedIn && (pathname === '/login' || pathname === '/signup')) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
   }
 
-  return supabaseResponse
+  return NextResponse.next({ request })
 }

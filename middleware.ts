@@ -23,8 +23,8 @@ export async function middleware(request: NextRequest) {
     return response
   }
 
-  // ── Supabase session refresh for all other routes
-  return await updateSession(request)
+  // ── Supabase session routing for all other routes (cookie-only, no network calls)
+  return updateSession(request)
 }
 
 export const config = {
