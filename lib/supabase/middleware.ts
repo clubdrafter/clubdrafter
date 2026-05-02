@@ -32,8 +32,10 @@ export async function updateSession(request: NextRequest) {
     }
   )
 
-  // Refresh session — IMPORTANT: do not add logic between createServerClient and getUser
-  const { data: { user } } = await supabase.auth.getUser()
+  // Use getSession (local cookie read) in middleware — getUser() makes a network call
+  // that exceeds Vercel's edge middleware timeout. Server Components use getUser() for security.
+  const { data: { session } } = await supabase.auth.getSession()
+  const user = session?.user ?? null
 
   const pathname = request.nextUrl.pathname
 
